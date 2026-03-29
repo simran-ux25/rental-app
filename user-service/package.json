@@ -21,7 +21,8 @@
     "googleapis": "^170.1.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.1.5",
-    "mysql2": "^3.17.1"
+    "mysql2": "^3.17.1",
+    "nodemailer": "^8.0.4"
   },
   "devDependencies": {
     "@types/axios": "^0.14.4",

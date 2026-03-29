@@ -487,3 +487,34 @@ export const refreshToken = async (req: Request, res: Response) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
+export const logout = async (req: Request, res: Response) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken || typeof refreshToken !== "string") {
+      return res.status(400).json({ message: "Invalid request" });
+    }
+
+    const tokenHash = crypto
+      .createHash("sha256")
+      .update(refreshToken)
+      .digest("hex");
+
+    await pool.execute(
+      `UPDATE refresh_tokens
+       SET revoked = TRUE
+       WHERE token_hash = ?`,
+      [tokenHash]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Logged out successfully"
+    });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
