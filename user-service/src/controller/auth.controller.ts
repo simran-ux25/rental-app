@@ -369,3 +369,121 @@ export const verifyLoginOtp = async (req: Request, res: Response) => {
 };
 
 
+export const refreshToken = async (req: Request, res: Response) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken || typeof refreshToken !== "string") {
+      return res.status(400).json({ message: "Invalid request" });
+    }
+
+    const tokenHash = crypto
+      .createHash("sha256")
+      .update(refreshToken)
+      .digest("hex");
+
+    const conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    try {
+      // 🔐 Lock row to prevent race conditions
+      const [rows]: any = await conn.execute(
+        `SELECT * FROM refresh_tokens
+         WHERE token_hash = ?
+         FOR UPDATE`,
+        [tokenHash]
+      );
+
+      if (rows.length === 0) {
+        await conn.rollback();
+        return res.status(401).json({ message: "Invalid refresh token" });
+      }
+
+      const tokenRecord = rows[0];
+
+      // 🚨 REUSE DETECTION
+      if (tokenRecord.revoked) {
+        // Possible token theft → revoke all sessions
+        await conn.execute(
+          `UPDATE refresh_tokens
+           SET revoked = TRUE
+           WHERE user_id = ?`,
+          [tokenRecord.user_id]
+        );
+
+        await conn.commit();
+
+        return res.status(403).json({
+          message: "Session compromised. Please login again."
+        });
+      }
+
+      // ❌ Expired token
+      if (new Date(tokenRecord.expires_at) < new Date()) {
+        await conn.execute(
+          `UPDATE refresh_tokens
+           SET revoked = TRUE
+           WHERE id = ?`,
+          [tokenRecord.id]
+        );
+
+        await conn.commit();
+
+        return res.status(401).json({ message: "Expired refresh token" });
+      }
+
+      // 🔐 Generate new refresh token
+      const newRaw = crypto.randomBytes(64).toString("hex");
+
+      const newHash = crypto
+        .createHash("sha256")
+        .update(newRaw)
+        .digest("hex");
+
+      const newExpiry = new Date();
+      newExpiry.setDate(newExpiry.getDate() + REFRESH_TOKEN_DAYS);
+
+      // 🔐 Insert new token
+      await conn.execute(
+        `INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
+         VALUES (?, ?, ?)`,
+        [tokenRecord.user_id, newHash, newExpiry]
+      );
+
+      // 🔐 Revoke old token + link it
+      await conn.execute(
+        `UPDATE refresh_tokens
+         SET revoked = TRUE,
+             replaced_by_token_hash = ?
+         WHERE id = ?`,
+        [newHash, tokenRecord.id]
+      );
+
+      // 🔐 Issue access token
+      const accessToken = jwt.sign(
+        { userId: tokenRecord.user_id },
+        process.env.JWT_SECRET as string,
+        { expiresIn: ACCESS_TOKEN_EXPIRY }
+      );
+
+      await conn.commit();
+
+      return res.status(200).json({
+        success: true,
+        accessToken,
+        refreshToken: newRaw,
+        expiresIn: 900
+      });
+
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
