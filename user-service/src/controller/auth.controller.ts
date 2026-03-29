@@ -488,6 +488,7 @@ export const refreshToken = async (req: Request, res: Response) => {
   }
 };
 
+
 export const logout = async (req: Request, res: Response) => {
   try {
     const { refreshToken } = req.body;
@@ -501,17 +502,49 @@ export const logout = async (req: Request, res: Response) => {
       .update(refreshToken)
       .digest("hex");
 
-    await pool.execute(
-      `UPDATE refresh_tokens
-       SET revoked = TRUE
-       WHERE token_hash = ?`,
-      [tokenHash]
-    );
+    const conn = await pool.getConnection();
+    await conn.beginTransaction();
 
-    return res.status(200).json({
-      success: true,
-      message: "Logged out successfully"
-    });
+    try {
+      // 🔐 Step 1: find token (even if revoked)
+      const [rows]: any = await conn.execute(
+        `SELECT user_id FROM refresh_tokens WHERE token_hash = ?`,
+        [tokenHash]
+      );
+
+      if (rows.length === 0) {
+        await conn.rollback();
+
+        // 🔒 Do NOT reveal token validity
+        return res.status(200).json({
+          success: true,
+          message: "Logged out successfully"
+        });
+      }
+
+      const userId = rows[0].user_id;
+
+      // 🔐 Step 2: revoke ALL sessions of user
+      await conn.execute(
+        `UPDATE refresh_tokens
+         SET revoked = TRUE
+         WHERE user_id = ?`,
+        [userId]
+      );
+
+      await conn.commit();
+
+      return res.status(200).json({
+        success: true,
+        message: "Logged out from all sessions"
+      });
+
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
 
   } catch (error) {
     console.error(error);
