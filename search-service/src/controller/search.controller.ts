@@ -193,3 +193,75 @@ export const searchPickupLocations = async (req: Request, res: Response) => {
   }
 };
 
+
+
+
+/**
+ * =========================================================
+ * 4. Get vehicles available at a pickup location
+ *
+ * Example:
+ * GET /search/location/vehicles?city=Pune&pickup_location=Viman Nagar
+ *
+ * Returns vehicle models available at that location
+ * =========================================================
+ */
+export const searchVehiclesByPickupLocation = async (req: Request, res: Response) => {
+
+  try {
+
+    const city = req.query.city as string;
+    const pickupLocation = (req.query.pickup_location as string || "").trim();
+    const sort = (req.query.sort as string || "relevance").trim();
+
+    if (!city || !pickupLocation) {
+      return res.status(400).json({
+        success: false,
+        message: "city and pickup_location are required"
+      });
+    }
+
+    let orderBy = "available_units DESC"; // default relevance
+
+    if (sort === "price_low") {
+      orderBy = "price_per_hour ASC";
+    }
+    else if (sort === "price_high") {
+      orderBy = "price_per_hour DESC";
+    }
+
+    const sql = `
+      SELECT
+        v.name AS vehicle_name,
+        COUNT(*) AS available_units,
+        MIN(v.price_per_hour) AS price_per_hour
+      FROM vehicles v
+      JOIN cities c ON c.id = v.city_id
+      WHERE
+        c.name = ?
+       AND v.pickup_location = ?
+    AND v.owner_status = 'ACTIVE'
+    AND v.booking_status = 'AVAILABLE'
+      GROUP BY v.name
+      ORDER BY ${orderBy}
+    `;
+
+    const [rows] = await pool.execute(sql, [city, pickupLocation]);
+
+    return res.status(200).json({
+      success: true,
+      data: rows
+    });
+
+  }
+  catch (error) {
+
+    console.error("searchVehiclesByPickupLocation error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "internal server error"
+    });
+
+  }
+};

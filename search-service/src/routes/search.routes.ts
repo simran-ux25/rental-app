@@ -5,6 +5,7 @@ import {
   searchVehicles,
   getVehicleLocations,
   searchPickupLocations,
+  searchVehiclesByPickupLocation
 } from "../controller/search.controller.js";
 
 const router = Router();
