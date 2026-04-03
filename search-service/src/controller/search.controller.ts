@@ -136,3 +136,60 @@ export const getVehicleLocations = async (req: Request, res: Response) => {
 
 
 
+/**
+ * =========================================================
+ * 3. Autocomplete pickup locations
+ *
+ * Example:
+ * GET /search/locations?city=Pune&query=vi
+ *
+ * Returns matching pickup locations
+ * =========================================================
+ */
+export const searchPickupLocations = async (req: Request, res: Response) => {
+
+  try {
+
+    const city = req.query.city as string;
+    const query = (req.query.query as string || "").trim();
+
+    if (!city || !query) {
+      return res.status(400).json({
+        success: false,
+        message: "city and query are required"
+      });
+    }
+
+    const sql = `
+      SELECT DISTINCT
+        v.pickup_location
+      FROM vehicles v
+      JOIN cities c ON c.id = v.city_id
+      WHERE
+        c.name = ?
+        AND v.status = 'ACTIVE'
+        AND v.pickup_location LIKE ?
+      ORDER BY v.pickup_location ASC
+      LIMIT 10
+    `;
+
+    const [rows] = await pool.execute(sql, [city, `${query}%`]);
+
+    return res.status(200).json({
+      success: true,
+      data: rows
+    });
+
+  }
+  catch (error) {
+
+    console.error("searchPickupLocations error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "internal server error"
+    });
+
+  }
+};
+
